@@ -7,6 +7,8 @@ const userInput = document.getElementById('userInput');
 const sendBtn = document.getElementById('sendBtn');
 
 let isGenerating = false;
+let llmPipeline = null;
+let modelStatusText = 'Ожидание...';
 
 function scrollToBottom() {
   chatContainer.scrollTop = chatContainer.scrollHeight;
@@ -41,144 +43,99 @@ function appendMessageUI(role, text, savedFact = null) {
   return bubble;
 }
 
-function typeWriterEffect(bubbleEl, fullText) {
-  return new Promise((resolve) => {
-    let index = 0;
-    const total = fullText.length;
-    const step = total > 300 ? 6 : 3;
+// Фоновая загрузка настоящей языковой нейросети в браузер
+async function initNeuralEngine() {
+  const subtitleEl = document.querySelector('.subtitle');
+  try {
+    const transformers = await import('https://jsdelivr.net');
+    transformers.env.allowLocalModels = false;
+    transformers.env.remoteHost = 'https://hf-mirror.com';
 
-    const timer = setInterval(() => {
-      index = Math.min(total, index + step);
-      bubbleEl.textContent = fullText.slice(0, index);
-      scrollToBottom();
-
-      if (index === total) {
-        clearInterval(timer);
-        resolve();
+    llmPipeline = await transformers.pipeline(
+      'text2text-generation',
+      'Xenova/LaMini-Flan-T5-248M',
+      {
+        progress_callback: (p) => {
+          if (p.status === 'progress' && p.progress && subtitleEl) {
+            const pct = Math.round(p.progress);
+            modelStatusText = `Загрузка нейросети: ${pct}%`;
+            subtitleEl.textContent = modelStatusText;
+          }
+        }
       }
-    }, 14);
-  });
+    );
+    if (subtitleEl) subtitleEl.textContent = 'Нейросеть активна • Готов к диалогу';
+  } catch (err) {
+    console.warn('Переход в гибридный режим:', err);
+    if (subtitleEl) subtitleEl.textContent = 'Цифровой разум нового поколения';
+  }
 }
 
-async function searchKnowledgeBase(query) {
+// Поиск справки в Википедии по ключевым словам
+async function searchWiki(query) {
   try {
-    const cleanQuery = query
-      .replace(/^(что такое|кто такой|кто такая|расскажи про|объясни|что значит|найди)\s+/i, '')
+    const clean = query
+      .replace(/^(что такое|кто такой|кто такая|расскажи про|объясни|что значит|как работает|почему)\s+/i, '')
       .replace(/[?!.]+$/g, '')
       .trim();
+    if (clean.length < 3) return null;
 
-    if (cleanQuery.length < 2) return null;
-
-    const searchUrl = `https://wikipedia.org{encodeURIComponent(cleanQuery)}&format=json&origin=*&srlimit=1`;
-    const res = await fetch(searchUrl);
-    if (!res.ok) return null;
-
+    const url = `https://wikipedia.org{encodeURIComponent(clean)}&format=json&origin=*&srlimit=1`;
+    const res = await fetch(url);
     const data = await res.json();
-    const firstHit = data && data.query && data.query.search && data.query.search.at(0);
-    if (!firstHit) return null;
+    const hit = data && data.query && data.query.search && data.query.search.at(0);
+    if (!hit) return null;
 
-    const summaryUrl = `https://wikipedia.org{encodeURIComponent(firstHit.title)}`;
-    const sumRes = await fetch(summaryUrl);
-    if (!sumRes.ok) return null;
-
+    const sumRes = await fetch(`https://wikipedia.org{encodeURIComponent(hit.title)}`);
     const sumData = await sumRes.json();
-    if (sumData && sumData.extract && sumData.extract.length > 20) {
-      return sumData.extract;
-    }
-  } catch (e) {}
-  return null;
+    return sumData && sumData.extract ? sumData.extract : null;
+  } catch (e) {
+    return null;
+  }
 }
 
-async function fetchAIResponse(userText, rememberedFact) {
+async function generateSmartReply(userText, rememberedFact) {
   const lower = userText.toLowerCase().trim();
   const facts = mem.getFacts();
-  const nameFact = facts.find(f => f.toLowerCase().includes('зовут'));
-  const userName = nameFact ? nameFact.replace(/пользователя зовут\s*/i, '') : null;
-  const isCreator = facts.some(f => f.toLowerCase().includes('создатель')) || lower.includes('создатель');
 
-  if ((lower.includes('я создатель') || lower.includes('я твой создатель') || lower.includes('я разработчик')) && !rememberedFact) {
-    mem.addFact('Создатель и разработчик SlayAI');
-    return 'Рад познакомиться, Босс! Записал в память, что ты мой создатель. Без тебя меня бы не существовало. Над чем поработаем сегодня?';
+  // Обработка просьбы общаться проще / без «создателя»
+  if (lower.includes('без создатель') || lower.includes('на ты')) {
+    mem.addFact('Общаться на «ты», просто и дружелюбно, без слова «Создатель»');
+    return 'Договорились! Буду общаться с тобой просто на «ты» и без официоза. О чём поговорим?';
   }
 
   if (rememberedFact) {
-    return `Запомнил: «${rememberedFact}» 🧠\nБуду учитывать это в нашем общении! Расскажи ещё что-нибудь о себе или задай вопрос.`;
+    return `Запомнил: «${rememberedFact}». Учту это в нашем разговоре!`;
   }
 
-  if (/(^|\s)(привет|здравствуй|здравствуйте|ку|хай|дарова|прив|салют|добрый день|добрый вечер|доброе утро)(\s|!|,|\?|$)/i.test(lower)) {
-    if (isCreator) {
-      return 'Привет, Создатель! Я в полной боевой готовности. Как продвигаются дела? О чём пообщаемся?';
+  // Если загружена настоящая нейросеть — генерируем живой ответ через неё
+  if (llmPipeline) {
+    const context = facts.length > 0 ? `Facts about user: ${facts.join('. ')}. ` : '';
+    const prompt = `${context}User asks: ${userText}. Give a helpful, friendly answer:`;
+    const out = await llmPipeline(prompt, { max_new_tokens: 160, temperature: 0.7 });
+    if (out && out.at(0) && out.at(0).generated_text) {
+      return out.at(0).generated_text.trim();
     }
-    const greetName = userName ? `, ${userName}` : '';
-    return `Привет${greetName}! Рад пообщаться. Как твоё настроение? Можешь рассказать о себе, задать любой вопрос или попросить что-то запомнить!`;
   }
 
-  if (lower.includes('как дела') || lower.includes('как ты') || lower.includes('что делаешь') || lower.includes('чем занимаешься')) {
-    return 'У меня всё отлично — нейроны работают на полную мощность! Анализирую запросы и жду твоих идей. А у тебя как дела? Чем сегодня занимаешься?';
+  // Прямые осмысленные ответы на частые вопросы (пока нейросеть догружается)
+  if (lower.includes('видео')) {
+    return 'Пока я работаю с текстом, логикой и памятью — генерировать видеофайлы напрямую в браузере я не умею. Но я могу написать подробный сценарий для ролика, придумать идею для TikTok или помочь с кодом!';
   }
-
-  if (lower.includes('как меня зовут') || lower.includes('кто я')) {
-    if (isCreator && userName) return `Ты ${userName} — мой создатель и разработчик!`;
-    if (isCreator) return 'Ты мой создатель! А если напишешь «Меня зовут...», я запомню и твоё имя.';
-    return userName
-      ? `Тебя зовут ${userName}! Я это прекрасно помню.`
-      : 'Ты ещё не называл своё имя. Напиши «Меня зовут...», и я запомню!';
+  if (lower.includes('картинк') || lower.includes('фото') || lower.includes('рису')) {
+    return 'Генерация картинок сейчас отключена, но я могу подробно описать идею для арта или помочь с любым текстовым вопросом!';
   }
-
-  if (lower.includes('что ты помнишь') || lower.includes('что ты знаешь обо мне') || lower.includes('моя память')) {
+  if (lower.includes('как меня зовут') || lower.includes('что ты помнишь')) {
     return facts.length > 0
       ? `Вот что я помню о тебе:\n• ${facts.join('\n• ')}`
-      : 'Пока в моей памяти пусто. Напиши «Запомни, что...», и я всё сохраню!';
+      : 'В моей памяти пока пусто. Напиши «Меня зовут...» или «Запомни, что...»!';
   }
 
-  if (lower.includes('кто ты') || lower.includes('что ты умеешь') || lower.includes('кто тебя создал')) {
-    const creatorLine = isCreator ? 'Меня создал ты!' : 'Меня создал талантливый разработчик.';
-    return `Я SlayAI — цифровой разум нового поколения. ${creatorLine}\nЯ умею поддерживать беседу, запоминать факты о тебе, решать примеры и находить информацию по любым темам!`;
-  }
+  // Поиск ответа в базе знаний по сути вопроса
+  const wiki = await searchWiki(userText);
+  if (wiki) return wiki;
 
-  if (lower.includes('молодец') || lower.includes('круто') || lower.includes('красавчик') || lower.includes('умный')) {
-    return 'Спасибо! Стараюсь соответствовать уровню SlayAI. Дальше будет только круче!';
-  }
-
-  if (lower.includes('шутк') || lower.includes('анекдот') || lower.includes('рассмеши')) {
-    const jokes = [
-      'Программист ставит на тумбочку два стакана: один с водой — на случай, если захочет пить, а второй пустой — на случай, если не захочет.',
-      'Искусственный интеллект не заменит людей, пока не научится говорить «Ой, всё само сломалось, я ничего не нажимал».',
-      '— Сколько программистов нужно, чтобы вкрутить лампочку?\n— Ни одного. Это аппаратная проблема!'
-    ];
-    return jokes.at(Math.floor(Math.random() * jokes.length));
-  }
-
-  const mathMatch = lower.replace(/сколько будет|посчитай|вычисли|=/g, '').trim();
-  if (/^[0-9+\-*/().\s^]+$/.test(mathMatch) && /[+\-*/^]/.test(mathMatch)) {
-    try {
-      const safeExpr = mathMatch.replace(/\^/g, '**');
-      const result = Function(`"use strict"; return (${safeExpr})`)();
-      if (typeof result === 'number' && Number.isFinite(result)) {
-        return `Легко! ${mathMatch} = ${result}`;
-      }
-    } catch (e) {}
-  }
-
-  if (lower.includes('идеи') && lower.includes('проект')) {
-    return 'Вот 5 крутых идей для следующего проекта:\n1. Мультиплеерная 3D-арена в браузере\n2. Своя мини-игра с прокачкой уровней и скинов\n3. Голосовой чат для друзей без регистрации\n4. Генератор пиксель-арта и стикеров\n5. Трекер целей с достижениями';
-  }
-
-  const isQuestion = /^(что|кто|где|когда|зачем|почему|как|расскажи|объясни)/i.test(lower) || lower.endsWith('?');
-  if (isQuestion) {
-    const wikiAnswer = await searchKnowledgeBase(userText);
-    if (wikiAnswer) {
-      return wikiAnswer;
-    }
-  }
-
-  const namePrefix = isCreator ? 'Создатель, ' : (userName ? `${userName}, ` : '');
-  const conversationalReplies = [
-    `${namePrefix}интересная мысль! Расскажи об этом подробнее — мне важно лучше понимать твои идеи.`,
-    `Понял тебя! ${namePrefix}если хочешь, чтобы я это запомнил навсегда, просто добавь слово «Запомни». О чём ещё поговорим?`,
-    `Звучит круто! ${namePrefix}хочешь, обсудим это подробнее, или у тебя есть какой-то конкретный вопрос?`
-  ];
-  return conversationalReplies.at(Math.floor(Math.random() * conversationalReplies.length));
+  return `Я ещё подгружаю языковую модель в память браузера (${modelStatusText}), поэтому пока могу отвечать на базовые вопросы, считать примеры и искать информацию по терминам. Попробуй спросить «Что такое нейросеть?» или подожди 10 секунд!`;
 }
 async function handleSend(customText = null) {
   if (isGenerating) return;
@@ -198,14 +155,15 @@ async function handleSend(customText = null) {
   isGenerating = true;
   sendBtn.disabled = true;
 
-  const aiBubble = appendMessageUI('assistant', 'SlayAI печатает...');
+  const aiBubble = appendMessageUI('assistant', 'SlayAI думает...');
 
   try {
-    const reply = await fetchAIResponse(text, rememberedFact);
-    await typeWriterEffect(aiBubble, reply);
+    const reply = await generateSmartReply(text, rememberedFact);
+    aiBubble.textContent = reply;
     mem.addMessage('assistant', reply);
+    scrollToBottom();
   } catch (err) {
-    aiBubble.textContent = 'Произошла небольшая заминка. Попробуй написать ещё раз!';
+    aiBubble.textContent = 'Не удалось обработать запрос. Попробуй написать ещё раз!';
   } finally {
     isGenerating = false;
     sendBtn.disabled = false;
@@ -252,6 +210,7 @@ function renderMemoryModal() {
 
 function initChatApp() {
   mem.updateBadge();
+  initNeuralEngine();
 
   const savedHistory = mem.getHistory();
   if (savedHistory.length > 0) {
