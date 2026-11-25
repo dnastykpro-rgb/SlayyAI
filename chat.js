@@ -43,7 +43,7 @@ function appendMessageUI(role, text, savedFact = null) {
   return bubble;
 }
 
-// Загрузка локальной языковой модели Qwen 2.5 прямо в браузер (один раз в кэш)
+// Загрузка ядра SlayAI с открытого зеркала (без блокировок и API-ключей)
 async function getLocalModel(statusBubble) {
   if (localGenerator) return localGenerator;
   if (isModelLoading) return null;
@@ -52,6 +52,7 @@ async function getLocalModel(statusBubble) {
   try {
     const { pipeline, env } = await import('https://jsdelivr.net');
     env.allowLocalModels = false;
+    env.remoteHost = 'https://hf-mirror.com';
 
     localGenerator = await pipeline(
       'text-generation',
@@ -59,9 +60,9 @@ async function getLocalModel(statusBubble) {
       {
         dtype: 'q4',
         progress_callback: (info) => {
-          if (info.status === 'progress' && info.progress) {
+          if (info.status === 'progress' && info.progress && statusBubble) {
             const pct = Math.round(info.progress);
-            statusBubble.textContent = `⚙️ Инициализация нейронного ядра SlayAI: ${pct}% (загружается один раз в память браузера)...`;
+            statusBubble.textContent = `⚡ Подключение ядра SlayAI: ${pct}%...`;
             scrollToBottom();
           }
         }
@@ -125,7 +126,7 @@ async function handleSend(customText = null) {
     mem.addMessage('assistant', reply);
     scrollToBottom();
   } catch (err) {
-    aiBubble.textContent = '⚠️ Не удалось загрузить модель (возможно, не хватает оперативной памяти или заблокирован доступ к файлам весов).';
+    aiBubble.textContent = '⚠️ Ошибка загрузки ядра. Проверь соединение с интернетом и обнови страницу.';
   } finally {
     isGenerating = false;
     sendBtn.disabled = false;
