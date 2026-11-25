@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>SlayAI — Цифровой разум нового поколения</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand-group">
+      <div class="logo">SLAY<span>AI</span></div>
+      <div class="tagline">Цифровой разум нового поколения</div>
+    </div>
+    <div class="status-pill">Циклов обучения: <strong id="epochCount">0</strong></div>
+  </header>
+
+  <main class="workspace">
+    <!-- 1. Холст ввода и дообучения -->
+    <section class="panel draw-panel">
+      <div class="panel-title">1. Ввод образа (цифра 0–9)</div>
+      <div class="canvas-wrap">
+        <canvas id="drawCanvas" width="224" height="224"></canvas>
+      </div>
+      <div class="draw-actions">
+        <button id="clearBtn" class="btn btn-dark">Очистить</button>
+        <button id="autoTrainBtn" class="btn btn-accent">⚡ Авто-калибровка</button>
+      </div>
+
+      <div class="panel-title sub">2. Адаптация под почерк</div>
+      <p class="hint">Укажи правильную цифру, чтобы модель скорректировала веса:</p>
+      <div id="trainButtons" class="digit-grid"></div>
+    </section>
+
+    <!-- 2. Визуализация нейронной активности -->
+    <section class="panel brain-panel">
+      <div class="panel-header">
+        <span class="panel-title">3. Активность ядра (196 → 32 → 10)</span>
+        <span class="loss-badge">Погрешность: <strong id="lossVal">0.000</strong></span>
+      </div>
+      <canvas id="brainCanvas" width="460" height="300"></canvas>
+      <div class="brain-actions">
+        <button id="saveBrainBtn" class="btn btn-dark">💾 Сохранить память</button>
+        <button id="resetBrainBtn" class="btn btn-danger">Сброс ядра</button>
+      </div>
+    </section>
+
+    <!-- 3. Вывод и вероятности -->
+    <section class="panel output-panel">
+      <div class="panel-title">4. Вердикт SlayAI</div>
+      <div class="prediction-hero">
+        <div class="pred-digit" id="topDigit">?</div>
+        <div class="pred-conf" id="topConf">Ожидание ввода...</div>
+      </div>
+      <div id="barsList" class="bars-list"></div>
+    </section>
+  </main>
+
+  <script src="neural.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
