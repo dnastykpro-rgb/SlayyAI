@@ -7,6 +7,8 @@ const userInput = document.getElementById('userInput');
 const sendBtn = document.getElementById('sendBtn');
 
 let isGenerating = false;
+let localGenerator = null;
+let isModelLoading = false;
 
 function scrollToBottom() {
   chatContainer.scrollTop = chatContainer.scrollHeight;
@@ -41,76 +43,61 @@ function appendMessageUI(role, text, savedFact = null) {
   return bubble;
 }
 
-function typeWriterEffect(bubbleEl, fullText) {
-  return new Promise((resolve) => {
-    let index = 0;
-    const total = fullText.length;
-    const step = total > 400 ? 6 : 3;
+// Загрузка локальной языковой модели Qwen 2.5 прямо в браузер (один раз в кэш)
+async function getLocalModel(statusBubble) {
+  if (localGenerator) return localGenerator;
+  if (isModelLoading) return null;
 
-    const timer = setInterval(() => {
-      index = Math.min(total, index + step);
-      bubbleEl.textContent = fullText.slice(0, index);
-      scrollToBottom();
+  isModelLoading = true;
+  try {
+    const { pipeline, env } = await import('https://jsdelivr.net');
+    env.allowLocalModels = false;
 
-      if (index === total) {
-        clearInterval(timer);
-        resolve();
+    localGenerator = await pipeline(
+      'text-generation',
+      'onnx-community/Qwen2.5-0.5B-Instruct',
+      {
+        dtype: 'q4',
+        progress_callback: (info) => {
+          if (info.status === 'progress' && info.progress) {
+            const pct = Math.round(info.progress);
+            statusBubble.textContent = `⚙️ Инициализация нейронного ядра SlayAI: ${pct}% (загружается один раз в память браузера)...`;
+            scrollToBottom();
+          }
+        }
       }
-    }, 16);
-  });
+    );
+    return localGenerator;
+  } finally {
+    isModelLoading = false;
+  }
 }
 
-async function fetchAIResponse(userText) {
-  const sysPrompt = mem.buildSystemPrompt();
-  const recentHistory = mem.getHistory().slice(-8);
+async function fetchAIResponse(userText, statusBubble) {
+  const generator = await getLocalModel(statusBubble);
+  if (!generator) {
+    return 'Ядро SlayAI ещё загружается, подожди пару секунд и повтори запрос.';
+  }
 
-  let contextDialog = `Инструкция: ${sysPrompt}\n\nДиалог:\n`;
-  recentHistory.forEach((m) => {
-    const speaker = m.role === 'user' ? 'Пользователь' : 'SlayAI';
-    contextDialog += `${speaker}: ${m.content}\n`;
+  statusBubble.textContent = 'SlayAI формулирует ответ...';
+
+  const messages = [
+    { role: 'system', content: mem.buildSystemPrompt() },
+    ...mem.getHistory().slice(-10)
+  ];
+
+  const output = await generator(messages, {
+    max_new_tokens: 320,
+    temperature: 0.7,
+    do_sample: true
   });
-  contextDialog += 'SlayAI:';
 
-  try {
-    const url = `https://pollinations.ai{encodeURIComponent(contextDialog)}?model=openai&seed=${Math.floor(Math.random() * 10000)}`;
-    const res = await fetch(url);
-    if (res.ok) {
-      const text = (await res.text()).trim();
-      if (text && text.length > 1) return text;
-    }
-  } catch (e) {}
-
-  try {
-    const res2 = await fetch('https://pollinations.ai', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        messages: [
-          { role: 'system', content: sysPrompt },
-          ...recentHistory
-        ],
-        model: 'openai'
-      })
-    });
-    if (res2.ok) {
-      const text2 = (await res2.text()).trim();
-      if (text2 && text2.length > 1) return text2;
-    }
-  } catch (e) {}
-
-  const facts = mem.getFacts();
-  const lower = userText.toLowerCase();
-  if (lower.includes('привет') || lower.includes('здравствуй')) {
-    return facts.length > 0
-      ? `Привет! Рад снова тебя видеть. Я помню о тебе: ${facts.join('; ')}. Чем могу помочь?`
-      : 'Привет! Я SlayAI. Готов ответить на твои вопросы или запомнить важную информацию о тебе!';
+  const generated = output && output.at(0) && output.at(0).generated_text;
+  if (Array.isArray(generated)) {
+    const lastMsg = generated.at(-1);
+    if (lastMsg && lastMsg.content) return lastMsg.content.trim();
   }
-  if (lower.includes('как меня зовут') || lower.includes('что ты обо мне помнишь') || lower.includes('что ты знаешь')) {
-    return facts.length > 0
-      ? `Вот что сохранено в моей памяти о тебе:\n• ${facts.join('\n• ')}`
-      : 'Пока в моей памяти нет записей о тебе. Напиши «Запомни, что...», и я всё сохраню!';
-  }
-  return 'Я зафиксировал твоё сообщение! Внешний облачный шлюз сейчас перегружен, но моя система памяти и диалога работает стабильно. Попробуй задать вопрос ещё раз через пару секунд.';
+  return 'Готово! Чем ещё могу помочь?';
 }
 async function handleSend(customText = null) {
   if (isGenerating) return;
@@ -130,14 +117,15 @@ async function handleSend(customText = null) {
   isGenerating = true;
   sendBtn.disabled = true;
 
-  const aiBubble = appendMessageUI('assistant', 'SlayAI думает...');
+  const aiBubble = appendMessageUI('assistant', 'Подготовка ядра SlayAI...');
 
   try {
-    const reply = await fetchAIResponse(text);
-    await typeWriterEffect(aiBubble, reply);
+    const reply = await fetchAIResponse(text, aiBubble);
+    aiBubble.textContent = reply;
     mem.addMessage('assistant', reply);
+    scrollToBottom();
   } catch (err) {
-    aiBubble.textContent = '⚠️ Не удалось получить ответ. Попробуй ещё раз.';
+    aiBubble.textContent = '⚠️ Не удалось загрузить модель (возможно, не хватает оперативной памяти или заблокирован доступ к файлам весов).';
   } finally {
     isGenerating = false;
     sendBtn.disabled = false;
