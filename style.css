@@ -1,0 +1,259 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+body {
+  background: #0b0f19;
+  color: #e2e8f0;
+  font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 22px;
+  background: #111827;
+  border-bottom: 1px solid #1f2937;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.brand-group {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.logo {
+  font-size: 24px;
+  font-weight: 900;
+  letter-spacing: 1px;
+}
+
+.logo span {
+  color: #38bdf8;
+}
+
+.tagline {
+  font-size: 13px;
+  color: #94a3b8;
+  font-weight: 500;
+}
+
+.status-pill, .loss-badge {
+  background: #1e293b;
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  color: #94a3b8;
+  border: 1px solid #334155;
+}
+
+.status-pill strong, .loss-badge strong {
+  color: #38bdf8;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: 300px 1fr 290px;
+  gap: 16px;
+  padding: 16px;
+  flex: 1;
+}
+
+@media (max-width: 980px) {
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+}
+
+.panel {
+  background: #111827;
+  border: 1px solid #1f2937;
+  border-radius: 20px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.panel-title {
+  font-size: 14px;
+  font-weight: 800;
+  color: #f8fafc;
+  margin-bottom: 10px;
+}
+
+.panel-title.sub {
+  margin-top: 16px;
+  margin-bottom: 4px;
+}
+
+.hint {
+  font-size: 12px;
+  color: #94a3b8;
+  margin-bottom: 10px;
+}
+
+.canvas-wrap {
+  display: flex;
+  justify-content: center;
+  background: #020617;
+  border: 2px solid #334155;
+  border-radius: 16px;
+  padding: 8px;
+  margin-bottom: 10px;
+}
+
+#drawCanvas {
+  background: #000000;
+  border-radius: 10px;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+#brainCanvas {
+  width: 100%;
+  height: auto;
+  background: #070b14;
+  border-radius: 14px;
+  border: 1px solid #1e293b;
+  flex: 1;
+}
+
+.draw-actions, .brain-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.btn {
+  flex: 1;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.1s, opacity 0.2s;
+}
+
+.btn:active {
+  transform: scale(0.96);
+}
+
+.btn-dark {
+  background: #1e293b;
+  color: #e2e8f0;
+  border: 1px solid #334155;
+}
+
+.btn-accent {
+  background: linear-gradient(135deg, #0284c7, #38bdf8);
+  color: #020617;
+}
+
+.btn-danger {
+  background: #450a0a;
+  color: #fca5a5;
+  border: 1px solid #7f1d1d;
+}
+
+.digit-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+}
+
+.digit-btn {
+  padding: 10px 0;
+  background: #1e293b;
+  color: #f8fafc;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  font-weight: 800;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.digit-btn:active {
+  background: #38bdf8;
+  color: #020617;
+}
+
+.prediction-hero {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 16px;
+  padding: 14px;
+  text-align: center;
+  margin-bottom: 12px;
+}
+
+.pred-digit {
+  font-size: 52px;
+  font-weight: 900;
+  color: #38bdf8;
+  line-height: 1;
+}
+
+.pred-conf {
+  font-size: 13px;
+  color: #94a3b8;
+  margin-top: 6px;
+}
+
+.bars-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.bar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.bar-label {
+  width: 16px;
+  color: #94a3b8;
+}
+
+.bar-track {
+  flex: 1;
+  height: 8px;
+  background: #1e293b;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.bar-fill {
+  height: 100%;
+  background: #38bdf8;
+  width: 0%;
+  transition: width 0.15s ease;
+}
+
+.bar-pct {
+  width: 38px;
+  text-align: right;
+  color: #cbd5e1;
+}
