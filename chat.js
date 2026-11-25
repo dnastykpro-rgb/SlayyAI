@@ -60,13 +60,14 @@ function typeWriterEffect(bubbleEl, fullText) {
   });
 }
 
+// Отправка запроса на серверную функцию Netlify
 async function fetchAIResponse() {
   const payloadMessages = [
     { role: 'system', content: mem.buildSystemPrompt() },
     ...mem.getHistory().slice(-14)
   ];
 
-  const response = await fetch('/api/chat', {
+  const response = await fetch('/.netlify/functions/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ messages: payloadMessages })
@@ -83,7 +84,6 @@ async function fetchAIResponse() {
 
   return data.reply;
 }
-
 async function handleSend(customText = null) {
   if (isGenerating) return;
   const text = (customText !== null ? customText : userInput.value).trim();
