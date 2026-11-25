@@ -7,8 +7,6 @@ const userInput = document.getElementById('userInput');
 const sendBtn = document.getElementById('sendBtn');
 
 let isGenerating = false;
-let llmPipeline = null;
-let modelStatusText = 'Ожидание...';
 
 function scrollToBottom() {
   chatContainer.scrollTop = chatContainer.scrollHeight;
@@ -43,100 +41,49 @@ function appendMessageUI(role, text, savedFact = null) {
   return bubble;
 }
 
-// Фоновая загрузка настоящей языковой нейросети в браузер
-async function initNeuralEngine() {
-  const subtitleEl = document.querySelector('.subtitle');
-  try {
-    const transformers = await import('https://jsdelivr.net');
-    transformers.env.allowLocalModels = false;
-    transformers.env.remoteHost = 'https://hf-mirror.com';
+function typeWriterEffect(bubbleEl, fullText) {
+  return new Promise((resolve) => {
+    let index = 0;
+    const total = fullText.length;
+    const step = total > 350 ? 6 : 3;
 
-    llmPipeline = await transformers.pipeline(
-      'text2text-generation',
-      'Xenova/LaMini-Flan-T5-248M',
-      {
-        progress_callback: (p) => {
-          if (p.status === 'progress' && p.progress && subtitleEl) {
-            const pct = Math.round(p.progress);
-            modelStatusText = `Загрузка нейросети: ${pct}%`;
-            subtitleEl.textContent = modelStatusText;
-          }
-        }
+    const timer = setInterval(() => {
+      index = Math.min(total, index + step);
+      bubbleEl.textContent = fullText.slice(0, index);
+      scrollToBottom();
+
+      if (index === total) {
+        clearInterval(timer);
+        resolve();
       }
-    );
-    if (subtitleEl) subtitleEl.textContent = 'Нейросеть активна • Готов к диалогу';
-  } catch (err) {
-    console.warn('Переход в гибридный режим:', err);
-    if (subtitleEl) subtitleEl.textContent = 'Цифровой разум нового поколения';
-  }
+    }, 15);
+  });
 }
 
-// Поиск справки в Википедии по ключевым словам
-async function searchWiki(query) {
-  try {
-    const clean = query
-      .replace(/^(что такое|кто такой|кто такая|расскажи про|объясни|что значит|как работает|почему)\s+/i, '')
-      .replace(/[?!.]+$/g, '')
-      .trim();
-    if (clean.length < 3) return null;
+async function fetchAIResponse() {
+  const payloadMessages = [
+    { role: 'system', content: mem.buildSystemPrompt() },
+    ...mem.getHistory().slice(-14)
+  ];
 
-    const url = `https://wikipedia.org{encodeURIComponent(clean)}&format=json&origin=*&srlimit=1`;
-    const res = await fetch(url);
-    const data = await res.json();
-    const hit = data && data.query && data.query.search && data.query.search.at(0);
-    if (!hit) return null;
+  const response = await fetch('/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages: payloadMessages })
+  });
 
-    const sumRes = await fetch(`https://wikipedia.org{encodeURIComponent(hit.title)}`);
-    const sumData = await sumRes.json();
-    return sumData && sumData.extract ? sumData.extract : null;
-  } catch (e) {
-    return null;
+  if (!response.ok) {
+    throw new Error('Ошибка ответа сервера');
   }
+
+  const data = await response.json();
+  if (!data.reply) {
+    throw new Error('Пустой ответ');
+  }
+
+  return data.reply;
 }
 
-async function generateSmartReply(userText, rememberedFact) {
-  const lower = userText.toLowerCase().trim();
-  const facts = mem.getFacts();
-
-  // Обработка просьбы общаться проще / без «создателя»
-  if (lower.includes('без создатель') || lower.includes('на ты')) {
-    mem.addFact('Общаться на «ты», просто и дружелюбно, без слова «Создатель»');
-    return 'Договорились! Буду общаться с тобой просто на «ты» и без официоза. О чём поговорим?';
-  }
-
-  if (rememberedFact) {
-    return `Запомнил: «${rememberedFact}». Учту это в нашем разговоре!`;
-  }
-
-  // Если загружена настоящая нейросеть — генерируем живой ответ через неё
-  if (llmPipeline) {
-    const context = facts.length > 0 ? `Facts about user: ${facts.join('. ')}. ` : '';
-    const prompt = `${context}User asks: ${userText}. Give a helpful, friendly answer:`;
-    const out = await llmPipeline(prompt, { max_new_tokens: 160, temperature: 0.7 });
-    if (out && out.at(0) && out.at(0).generated_text) {
-      return out.at(0).generated_text.trim();
-    }
-  }
-
-  // Прямые осмысленные ответы на частые вопросы (пока нейросеть догружается)
-  if (lower.includes('видео')) {
-    return 'Пока я работаю с текстом, логикой и памятью — генерировать видеофайлы напрямую в браузере я не умею. Но я могу написать подробный сценарий для ролика, придумать идею для TikTok или помочь с кодом!';
-  }
-  if (lower.includes('картинк') || lower.includes('фото') || lower.includes('рису')) {
-    return 'Генерация картинок сейчас отключена, но я могу подробно описать идею для арта или помочь с любым текстовым вопросом!';
-  }
-  if (lower.includes('как меня зовут') || lower.includes('что ты помнишь')) {
-    return facts.length > 0
-      ? `Вот что я помню о тебе:\n• ${facts.join('\n• ')}`
-      : 'В моей памяти пока пусто. Напиши «Меня зовут...» или «Запомни, что...»!';
-  }
-
-  // Поиск ответа в базе знаний по сути вопроса
-  const wiki = await searchWiki(userText);
-  if (wiki) return wiki;
-
-  return `Я ещё подгружаю языковую модель в память браузера (${modelStatusText}), поэтому пока могу отвечать на базовые вопросы, считать примеры и искать информацию по терминам. Попробуй спросить «Что такое нейросеть?» или подожди 10 секунд!`;
-}
 async function handleSend(customText = null) {
   if (isGenerating) return;
   const text = (customText !== null ? customText : userInput.value).trim();
@@ -158,12 +105,11 @@ async function handleSend(customText = null) {
   const aiBubble = appendMessageUI('assistant', 'SlayAI думает...');
 
   try {
-    const reply = await generateSmartReply(text, rememberedFact);
-    aiBubble.textContent = reply;
+    const reply = await fetchAIResponse();
+    await typeWriterEffect(aiBubble, reply);
     mem.addMessage('assistant', reply);
-    scrollToBottom();
   } catch (err) {
-    aiBubble.textContent = 'Не удалось обработать запрос. Попробуй написать ещё раз!';
+    aiBubble.textContent = '⚠️ Сервер SlayAI сейчас перегружен. Попробуй отправить сообщение ещё раз!';
   } finally {
     isGenerating = false;
     sendBtn.disabled = false;
@@ -210,13 +156,10 @@ function renderMemoryModal() {
 
 function initChatApp() {
   mem.updateBadge();
-  initNeuralEngine();
 
   const savedHistory = mem.getHistory();
   if (savedHistory.length > 0) {
-    savedHistory.forEach((m) => {
-      appendMessageUI(m.role, m.content);
-    });
+    savedHistory.forEach((m) => appendMessageUI(m.role, m.content));
   }
 
   sendBtn.addEventListener('click', () => handleSend());
