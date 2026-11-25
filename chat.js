@@ -60,7 +60,6 @@ function typeWriterEffect(bubbleEl, fullText) {
   });
 }
 
-// Поиск точной справки через открытый API Русской Википедии
 async function searchKnowledgeBase(query) {
   try {
     const cleanQuery = query
@@ -90,68 +89,96 @@ async function searchKnowledgeBase(query) {
   return null;
 }
 
-// Умный автономный генератор ответов SlayAI с учетом памяти
 async function fetchAIResponse(userText, rememberedFact) {
   const lower = userText.toLowerCase().trim();
   const facts = mem.getFacts();
   const nameFact = facts.find(f => f.toLowerCase().includes('зовут'));
   const userName = nameFact ? nameFact.replace(/пользователя зовут\s*/i, '') : null;
+  const isCreator = facts.some(f => f.toLowerCase().includes('создатель')) || lower.includes('создатель');
 
-  // 1. Если только что запомнили факт
-  if (rememberedFact) {
-    return `Отлично, я записал это в свою долгосрочную память: «${rememberedFact}».\nТеперь я буду учитывать это во всех наших диалогах! О чём ещё поговорим?`;
+  if ((lower.includes('я создатель') || lower.includes('я твой создатель') || lower.includes('я разработчик')) && !rememberedFact) {
+    mem.addFact('Создатель и разработчик SlayAI');
+    return 'Рад познакомиться, Босс! Записал в память, что ты мой создатель. Без тебя меня бы не существовало. Над чем поработаем сегодня?';
   }
 
-  // 2. Вопросы про память и имя
+  if (rememberedFact) {
+    return `Запомнил: «${rememberedFact}» 🧠\nБуду учитывать это в нашем общении! Расскажи ещё что-нибудь о себе или задай вопрос.`;
+  }
+
+  if (/(^|\s)(привет|здравствуй|здравствуйте|ку|хай|дарова|прив|салют|добрый день|добрый вечер|доброе утро)(\s|!|,|\?|$)/i.test(lower)) {
+    if (isCreator) {
+      return 'Привет, Создатель! Я в полной боевой готовности. Как продвигаются дела? О чём пообщаемся?';
+    }
+    const greetName = userName ? `, ${userName}` : '';
+    return `Привет${greetName}! Рад пообщаться. Как твоё настроение? Можешь рассказать о себе, задать любой вопрос или попросить что-то запомнить!`;
+  }
+
+  if (lower.includes('как дела') || lower.includes('как ты') || lower.includes('что делаешь') || lower.includes('чем занимаешься')) {
+    return 'У меня всё отлично — нейроны работают на полную мощность! Анализирую запросы и жду твоих идей. А у тебя как дела? Чем сегодня занимаешься?';
+  }
+
   if (lower.includes('как меня зовут') || lower.includes('кто я')) {
+    if (isCreator && userName) return `Ты ${userName} — мой создатель и разработчик!`;
+    if (isCreator) return 'Ты мой создатель! А если напишешь «Меня зовут...», я запомню и твоё имя.';
     return userName
-      ? `Тебя зовут ${userName}! Я отлично это помню.`
+      ? `Тебя зовут ${userName}! Я это прекрасно помню.`
       : 'Ты ещё не называл своё имя. Напиши «Меня зовут...», и я запомню!';
   }
 
   if (lower.includes('что ты помнишь') || lower.includes('что ты знаешь обо мне') || lower.includes('моя память')) {
     return facts.length > 0
-      ? `Вот всё, что сохранено в моей памяти о тебе:\n• ${facts.join('\n• ')}`
-      : 'Моя память о тебе пока пуста. Напиши «Запомни, что...» или добавь факты через кнопку «🧠 Память» вверху!';
-  }
-
-  // 3. Приветствия и знакомство
-  if (/^(привет|здравствуй|ку|хай|дарова|добрый день|добрый вечер|hello|hi)\b/i.test(lower)) {
-    const greetName = userName ? `, ${userName}` : '';
-    const extra = facts.length > 0 ? ` Я помню твои заметки (${facts.length} шт. в памяти).` : '';
-    return `Привет${greetName}! Я SlayAI — твой цифровой ассистент.${extra} Задай любой вопрос, попроси посчитать пример или скажи, что нужно запомнить!`;
+      ? `Вот что я помню о тебе:\n• ${facts.join('\n• ')}`
+      : 'Пока в моей памяти пусто. Напиши «Запомни, что...», и я всё сохраню!';
   }
 
   if (lower.includes('кто ты') || lower.includes('что ты умеешь') || lower.includes('кто тебя создал')) {
-    return 'Я SlayAI — цифровой разум нового поколения.\nЯ умею:\n• Запоминать важные факты о тебе между диалогами\n• Находить информацию и объяснять сложные темы\n• Решать математические примеры\n• Генерировать идеи для проектов и кода';
+    const creatorLine = isCreator ? 'Меня создал ты!' : 'Меня создал талантливый разработчик.';
+    return `Я SlayAI — цифровой разум нового поколения. ${creatorLine}\nЯ умею поддерживать беседу, запоминать факты о тебе, решать примеры и находить информацию по любым темам!`;
   }
 
-  // 4. Калькулятор математических выражений
+  if (lower.includes('молодец') || lower.includes('круто') || lower.includes('красавчик') || lower.includes('умный')) {
+    return 'Спасибо! Стараюсь соответствовать уровню SlayAI. Дальше будет только круче!';
+  }
+
+  if (lower.includes('шутк') || lower.includes('анекдот') || lower.includes('рассмеши')) {
+    const jokes = [
+      'Программист ставит на тумбочку два стакана: один с водой — на случай, если захочет пить, а второй пустой — на случай, если не захочет.',
+      'Искусственный интеллект не заменит людей, пока не научится говорить «Ой, всё само сломалось, я ничего не нажимал».',
+      '— Сколько программистов нужно, чтобы вкрутить лампочку?\n— Ни одного. Это аппаратная проблема!'
+    ];
+    return jokes.at(Math.floor(Math.random() * jokes.length));
+  }
+
   const mathMatch = lower.replace(/сколько будет|посчитай|вычисли|=/g, '').trim();
   if (/^[0-9+\-*/().\s^]+$/.test(mathMatch) && /[+\-*/^]/.test(mathMatch)) {
     try {
       const safeExpr = mathMatch.replace(/\^/g, '**');
       const result = Function(`"use strict"; return (${safeExpr})`)();
       if (typeof result === 'number' && Number.isFinite(result)) {
-        return `Результат вычисления:\n${mathMatch} = ${result}`;
+        return `Легко! ${mathMatch} = ${result}`;
       }
     } catch (e) {}
   }
 
-  // 5. Идеи для проектов
   if (lower.includes('идеи') && lower.includes('проект')) {
-    return 'Вот 5 отличных идей для пет-проекта на JavaScript:\n1. Браузерная мультиплеерная игра с захватом территорий (как ZoneRush)\n2. Умный трекер привычек с системой уровней и наград\n3. Голосовой чат для браузера на WebRTC\n4. Генератор пиксель-арта с экспортом в PNG\n5. Личный ИИ-дневник с поиском по заметкам';
+    return 'Вот 5 крутых идей для следующего проекта:\n1. Мультиплеерная 3D-арена в браузере\n2. Своя мини-игра с прокачкой уровней и скинов\n3. Голосовой чат для друзей без регистрации\n4. Генератор пиксель-арта и стикеров\n5. Трекер целей с достижениями';
   }
 
-  // 6. Поиск ответа в базе знаний (Википедия)
-  const wikiAnswer = await searchKnowledgeBase(userText);
-  if (wikiAnswer) {
-    return wikiAnswer;
+  const isQuestion = /^(что|кто|где|когда|зачем|почему|как|расскажи|объясни)/i.test(lower) || lower.endsWith('?');
+  if (isQuestion) {
+    const wikiAnswer = await searchKnowledgeBase(userText);
+    if (wikiAnswer) {
+      return wikiAnswer;
+    }
   }
 
-  // 7. Универсальный живой ответ с опорой на контекст
-  const personalHint = userName ? `${userName}, я` : 'Я';
-  return `${personalHint} внимательно изучил твой запрос: «${userText}».\nУточни, пожалуйста, чуть подробнее, что именно нужно сделать (объяснить термин, посчитать пример, подсказать идею или сохранить факт в память)?`;
+  const namePrefix = isCreator ? 'Создатель, ' : (userName ? `${userName}, ` : '');
+  const conversationalReplies = [
+    `${namePrefix}интересная мысль! Расскажи об этом подробнее — мне важно лучше понимать твои идеи.`,
+    `Понял тебя! ${namePrefix}если хочешь, чтобы я это запомнил навсегда, просто добавь слово «Запомни». О чём ещё поговорим?`,
+    `Звучит круто! ${namePrefix}хочешь, обсудим это подробнее, или у тебя есть какой-то конкретный вопрос?`
+  ];
+  return conversationalReplies.at(Math.floor(Math.random() * conversationalReplies.length));
 }
 async function handleSend(customText = null) {
   if (isGenerating) return;
