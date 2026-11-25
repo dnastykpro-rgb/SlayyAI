@@ -17,27 +17,29 @@ exports.handler = async function (event) {
     const userText = lastUserObj && lastUserObj.content ? lastUserObj.content.trim() : 'Привет';
     const sysPrompt = sysObj && sysObj.content ? sysObj.content : '';
 
-    // 1. Бесплатный шлюз DuckDuckGo AI (работает с IP Netlify без ключа)
+    // 1. Бесплатный шлюз DuckDuckGo AI (GPT-4o-mini без ключа)
     try {
       const statusRes = await fetch('https://duckduckgo.com', {
-        headers: { 'x-vqd-accept': '1', 'User-Agent': 'Mozilla/5.0' }
+        headers: {
+          'x-vqd-accept': '1',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
       });
       const vqd = statusRes.headers.get('x-vqd-4');
 
       if (vqd) {
-        const ddgMessages = [
-          { role: 'user', content: `${sysPrompt}\n\nВопрос пользователя: ${userText}` }
-        ];
         const chatRes = await fetch('https://duckduckgo.com', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'x-vqd-4': vqd,
-            'User-Agent': 'Mozilla/5.0'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
           },
           body: JSON.stringify({
             model: 'gpt-4o-mini',
-            messages: ddgMessages
+            messages: [
+              { role: 'user', content: `${sysPrompt}\n\n${userText}` }
+            ]
           })
         });
 
@@ -60,10 +62,10 @@ exports.handler = async function (event) {
       }
     } catch (e) {}
 
-    // 2. Резервный бесплатный канал Pollinations
+    // 2. Резервный бесплатный шлюз Pollinations
     try {
       const prompt = `${sysPrompt}\nПользователь: ${userText}\nSlayAI:`;
-      const res2 = await fetch(`https://pollinations.ai{encodeURIComponent(prompt)}?model=openai&seed=${Date.now()}`);
+      const res2 = await fetch(`https://pollinations.ai{encodeURIComponent(prompt)}?model=openai`);
       if (res2.ok) {
         const text2 = (await res2.text()).trim();
         if (text2.length !== 0 && !text2.startsWith('{') && !text2.includes('<!DOCTYPE')) {
@@ -72,25 +74,36 @@ exports.handler = async function (event) {
       }
     } catch (e) {}
 
-    // 3. Гарантированный резерв: Энциклопедия + Умный диалог с учетом памяти (никогда не выдает ошибку!)
+    // 3. Умный серверный движок (если внешние бесплатные шлюзы временно недоступны)
     const lower = userText.toLowerCase();
+
+    if (lower.includes('видео')) {
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({
+          reply: 'Пока я специализируюсь на тексте, коде, ответах на вопросы и запоминании информации — генерировать готовые видеофайлы я не умею. Но я с радостью напишу для тебя сценарий видео или придумаю идею для ролика!'
+        })
+      };
+    }
+
     if (/(^|\s)(привет|здравствуй|ку|хай|дарова|салют)(\s|!|,|\?|$)/i.test(lower)) {
       return {
         statusCode: 200,
         headers,
         body: JSON.stringify({
-          reply: 'Привет! Я SlayAI. Рад пообщаться! Задай мне любой вопрос, попроси что-нибудь объяснить или скажи «Запомни, что...», и я сохраню это в память.'
+          reply: 'Привет! Я SlayAI. Рад пообщаться! Задавай любые вопросы или напиши «Запомни, что...», чтобы я сохранил важную информацию о тебе.'
         })
       };
     }
 
-    // Поиск ответа в Русской Википедии по сути вопроса
+    // Поиск по Русской Википедии (без знаков сравнения < и >)
     const cleanQuery = userText
       .replace(/^(что такое|кто такой|кто такая|расскажи про|объясни|что значит|как работает)\s+/i, '')
       .replace(/[?!.]+$/g, '')
       .trim();
 
-    if (cleanQuery.length >= 2) {
+    if (cleanQuery.length !== 0 && cleanQuery.length !== 1) {
       const searchUrl = `https://wikipedia.org{encodeURIComponent(cleanQuery)}&format=json&srlimit=1`;
       const sRes = await fetch(searchUrl, { headers: { 'User-Agent': 'SlayAI/1.0' } });
       if (sRes.ok) {
@@ -114,14 +127,14 @@ exports.handler = async function (event) {
       statusCode: 200,
       headers,
       body: JSON.stringify({
-        reply: `Интересный вопрос: «${userText}»! Уточни немного подробнее, что именно тебя интересует, чтобы я дал максимально точный ответ.`
+        reply: `Понял тебя: «${userText}». Уточни, пожалуйста, что именно тебя интересует по этой теме, и я разберу это подробнее!`
       })
     };
   } catch (err) {
     return {
       statusCode: 200,
       headers,
-      body: JSON.stringify({ reply: 'Я на связи! Попробуй сформулировать вопрос чуть иначе.' })
+      body: JSON.stringify({ reply: `Я на связи! О чём хочешь поговорить?` })
     };
   }
 };
