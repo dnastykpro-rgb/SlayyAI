@@ -7,8 +7,6 @@ const userInput = document.getElementById('userInput');
 const sendBtn = document.getElementById('sendBtn');
 
 let isGenerating = false;
-let localGenerator = null;
-let isModelLoading = false;
 
 function scrollToBottom() {
   chatContainer.scrollTop = chatContainer.scrollHeight;
@@ -43,62 +41,117 @@ function appendMessageUI(role, text, savedFact = null) {
   return bubble;
 }
 
-// Загрузка ядра SlayAI с открытого зеркала (без блокировок и API-ключей)
-async function getLocalModel(statusBubble) {
-  if (localGenerator) return localGenerator;
-  if (isModelLoading) return null;
+function typeWriterEffect(bubbleEl, fullText) {
+  return new Promise((resolve) => {
+    let index = 0;
+    const total = fullText.length;
+    const step = total > 300 ? 6 : 3;
 
-  isModelLoading = true;
-  try {
-    const { pipeline, env } = await import('https://jsdelivr.net');
-    env.allowLocalModels = false;
-    env.remoteHost = 'https://hf-mirror.com';
+    const timer = setInterval(() => {
+      index = Math.min(total, index + step);
+      bubbleEl.textContent = fullText.slice(0, index);
+      scrollToBottom();
 
-    localGenerator = await pipeline(
-      'text-generation',
-      'onnx-community/Qwen2.5-0.5B-Instruct',
-      {
-        dtype: 'q4',
-        progress_callback: (info) => {
-          if (info.status === 'progress' && info.progress && statusBubble) {
-            const pct = Math.round(info.progress);
-            statusBubble.textContent = `⚡ Подключение ядра SlayAI: ${pct}%...`;
-            scrollToBottom();
-          }
-        }
+      if (index === total) {
+        clearInterval(timer);
+        resolve();
       }
-    );
-    return localGenerator;
-  } finally {
-    isModelLoading = false;
-  }
+    }, 14);
+  });
 }
 
-async function fetchAIResponse(userText, statusBubble) {
-  const generator = await getLocalModel(statusBubble);
-  if (!generator) {
-    return 'Ядро SlayAI ещё загружается, подожди пару секунд и повтори запрос.';
+// Поиск точной справки через открытый API Русской Википедии
+async function searchKnowledgeBase(query) {
+  try {
+    const cleanQuery = query
+      .replace(/^(что такое|кто такой|кто такая|расскажи про|объясни|что значит|найди)\s+/i, '')
+      .replace(/[?!.]+$/g, '')
+      .trim();
+
+    if (cleanQuery.length < 2) return null;
+
+    const searchUrl = `https://wikipedia.org{encodeURIComponent(cleanQuery)}&format=json&origin=*&srlimit=1`;
+    const res = await fetch(searchUrl);
+    if (!res.ok) return null;
+
+    const data = await res.json();
+    const firstHit = data && data.query && data.query.search && data.query.search.at(0);
+    if (!firstHit) return null;
+
+    const summaryUrl = `https://wikipedia.org{encodeURIComponent(firstHit.title)}`;
+    const sumRes = await fetch(summaryUrl);
+    if (!sumRes.ok) return null;
+
+    const sumData = await sumRes.json();
+    if (sumData && sumData.extract && sumData.extract.length > 20) {
+      return sumData.extract;
+    }
+  } catch (e) {}
+  return null;
+}
+
+// Умный автономный генератор ответов SlayAI с учетом памяти
+async function fetchAIResponse(userText, rememberedFact) {
+  const lower = userText.toLowerCase().trim();
+  const facts = mem.getFacts();
+  const nameFact = facts.find(f => f.toLowerCase().includes('зовут'));
+  const userName = nameFact ? nameFact.replace(/пользователя зовут\s*/i, '') : null;
+
+  // 1. Если только что запомнили факт
+  if (rememberedFact) {
+    return `Отлично, я записал это в свою долгосрочную память: «${rememberedFact}».\nТеперь я буду учитывать это во всех наших диалогах! О чём ещё поговорим?`;
   }
 
-  statusBubble.textContent = 'SlayAI формулирует ответ...';
-
-  const messages = [
-    { role: 'system', content: mem.buildSystemPrompt() },
-    ...mem.getHistory().slice(-10)
-  ];
-
-  const output = await generator(messages, {
-    max_new_tokens: 320,
-    temperature: 0.7,
-    do_sample: true
-  });
-
-  const generated = output && output.at(0) && output.at(0).generated_text;
-  if (Array.isArray(generated)) {
-    const lastMsg = generated.at(-1);
-    if (lastMsg && lastMsg.content) return lastMsg.content.trim();
+  // 2. Вопросы про память и имя
+  if (lower.includes('как меня зовут') || lower.includes('кто я')) {
+    return userName
+      ? `Тебя зовут ${userName}! Я отлично это помню.`
+      : 'Ты ещё не называл своё имя. Напиши «Меня зовут...», и я запомню!';
   }
-  return 'Готово! Чем ещё могу помочь?';
+
+  if (lower.includes('что ты помнишь') || lower.includes('что ты знаешь обо мне') || lower.includes('моя память')) {
+    return facts.length > 0
+      ? `Вот всё, что сохранено в моей памяти о тебе:\n• ${facts.join('\n• ')}`
+      : 'Моя память о тебе пока пуста. Напиши «Запомни, что...» или добавь факты через кнопку «🧠 Память» вверху!';
+  }
+
+  // 3. Приветствия и знакомство
+  if (/^(привет|здравствуй|ку|хай|дарова|добрый день|добрый вечер|hello|hi)\b/i.test(lower)) {
+    const greetName = userName ? `, ${userName}` : '';
+    const extra = facts.length > 0 ? ` Я помню твои заметки (${facts.length} шт. в памяти).` : '';
+    return `Привет${greetName}! Я SlayAI — твой цифровой ассистент.${extra} Задай любой вопрос, попроси посчитать пример или скажи, что нужно запомнить!`;
+  }
+
+  if (lower.includes('кто ты') || lower.includes('что ты умеешь') || lower.includes('кто тебя создал')) {
+    return 'Я SlayAI — цифровой разум нового поколения.\nЯ умею:\n• Запоминать важные факты о тебе между диалогами\n• Находить информацию и объяснять сложные темы\n• Решать математические примеры\n• Генерировать идеи для проектов и кода';
+  }
+
+  // 4. Калькулятор математических выражений
+  const mathMatch = lower.replace(/сколько будет|посчитай|вычисли|=/g, '').trim();
+  if (/^[0-9+\-*/().\s^]+$/.test(mathMatch) && /[+\-*/^]/.test(mathMatch)) {
+    try {
+      const safeExpr = mathMatch.replace(/\^/g, '**');
+      const result = Function(`"use strict"; return (${safeExpr})`)();
+      if (typeof result === 'number' && Number.isFinite(result)) {
+        return `Результат вычисления:\n${mathMatch} = ${result}`;
+      }
+    } catch (e) {}
+  }
+
+  // 5. Идеи для проектов
+  if (lower.includes('идеи') && lower.includes('проект')) {
+    return 'Вот 5 отличных идей для пет-проекта на JavaScript:\n1. Браузерная мультиплеерная игра с захватом территорий (как ZoneRush)\n2. Умный трекер привычек с системой уровней и наград\n3. Голосовой чат для браузера на WebRTC\n4. Генератор пиксель-арта с экспортом в PNG\n5. Личный ИИ-дневник с поиском по заметкам';
+  }
+
+  // 6. Поиск ответа в базе знаний (Википедия)
+  const wikiAnswer = await searchKnowledgeBase(userText);
+  if (wikiAnswer) {
+    return wikiAnswer;
+  }
+
+  // 7. Универсальный живой ответ с опорой на контекст
+  const personalHint = userName ? `${userName}, я` : 'Я';
+  return `${personalHint} внимательно изучил твой запрос: «${userText}».\nУточни, пожалуйста, чуть подробнее, что именно нужно сделать (объяснить термин, посчитать пример, подсказать идею или сохранить факт в память)?`;
 }
 async function handleSend(customText = null) {
   if (isGenerating) return;
@@ -118,15 +171,14 @@ async function handleSend(customText = null) {
   isGenerating = true;
   sendBtn.disabled = true;
 
-  const aiBubble = appendMessageUI('assistant', 'Подготовка ядра SlayAI...');
+  const aiBubble = appendMessageUI('assistant', 'SlayAI печатает...');
 
   try {
-    const reply = await fetchAIResponse(text, aiBubble);
-    aiBubble.textContent = reply;
+    const reply = await fetchAIResponse(text, rememberedFact);
+    await typeWriterEffect(aiBubble, reply);
     mem.addMessage('assistant', reply);
-    scrollToBottom();
   } catch (err) {
-    aiBubble.textContent = '⚠️ Ошибка загрузки ядра. Проверь соединение с интернетом и обнови страницу.';
+    aiBubble.textContent = 'Произошла небольшая заминка. Попробуй написать ещё раз!';
   } finally {
     isGenerating = false;
     sendBtn.disabled = false;
